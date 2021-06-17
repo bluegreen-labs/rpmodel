@@ -3,27 +3,8 @@
 #' R implementation of the P-model and its 
 #' corollary predictions (Prentice et al., 2014; Han et al., 2017).
 #'
-#' @param tc Temperature, relevant for photosynthesis (deg C)
-#' @param vpd Vapour pressure deficit (Pa)
-#' @param co2 Atmospheric CO2 concentration (ppm)
-#' @param fapar (Optional) Fraction of absorbed photosynthetically active
-#'  radiation (unitless, defaults to \code{NA})
-#' @param ppfd Incident photosynthetic photon flux density 
-#'  (mol m-2 d-1, defaults to \code{NA}). Note that the units of 
-#'  \code{ppfd} (per area and per time) determine the units of outputs 
-#'  \code{lue}, \code{gpp}, \code{vcmax}, and \code{rd}. For example, 
-#'  if \code{ppfd} is provided in units of mol m-2 month-1, then
-#'  respective output variables are returned as per unit months.
-#' @param patm Atmospheric pressure (Pa). When provided, overrides
-#'  \code{elv}, otherwise \code{patm} is calculated using standard
-#'  atmosphere (101325 Pa), corrected for elevation (argument \code{elv}),
-#'  using the function \link{patm}.
-#' @param elv Elevation above sea-level (m.a.s.l.). Is used only for 
-#'  calculating atmospheric pressure (using standard atmosphere (101325 Pa),
-#'  corrected for elevation (argument \code{elv}), using the function
-#' \link{patm}), if argument \code{patm} is not provided. If argument
-#' \code{patm} is provided, \code{elv} is overridden.
-#' @param kphio Apparent quantum yield efficiency (unitless). Defaults to
+#' @param par Nested list with parameters, in this case three parameters:
+#'  kphio Apparent quantum yield efficiency (unitless). Defaults to
 #'  0.081785 for \code{method_jmaxlim="wang17", do_ftemp_kphio=TRUE, 
 #'  do_soilmstress=FALSE}, 0.087182 for \code{method_jmaxlim="wang17",
 #'  do_ftemp_kphio=TRUE, do_soilmstress=TRUE}, and 0.049977 for 
@@ -31,51 +12,74 @@
 #'  corresponding to the empirically fitted value as presented in Stocker et al.
 #'  (2019) Geosci. Model Dev. for model setup 'BRC', 'FULL', and 'ORG' 
 #'  respectively.
-#' @param beta Unit cost ratio. Defaults to 146.0 (see Stocker et al., 2019).
-#' @param soilm (Optional, used only if \code{do_soilmstress==TRUE}) Relative 
+#'  apar_soilm (Optional, used only if \code{do_soilmstress==TRUE}) 
+#'  Parameter determining the sensitivity of the empirical soil moisture stress 
+#'  function. Defaults to 0.0, the empirically fitted value as presented in 
+#'  Stocker et al. (2019) Geosci. Model Dev. for model setup 'FULL' 
+#'  (corresponding to a setup with \code{method_jmaxlim="wang17", 
+#'  do_ftemp_kphio=TRUE, do_soilmstress=TRUE}).
+#'  bpar_soilm (Optional, used only if \code{do_soilmstress==TRUE}) 
+#'  Parameter determining the sensitivity of the empirical soil moisture stress
+#'  function. Defaults to 0.7330, the empirically fitted value as presented in 
+#'  Stocker et al. (2019) Geosci. Model Dev. for model setup 'FULL' 
+#'  (corresponding to a setup with \code{method_jmaxlim="wang17", 
+#'  do_ftemp_kphio=TRUE, do_soilmstress=TRUE}).
+#' 
+#' @param data data frame  containing:
+#'  - tc Temperature, relevant for photosynthesis (deg C)
+#'  - vpd Vapour pressure deficit (Pa)
+#'  - co2 Atmospheric CO2 concentration (ppm)
+#'  - fapar (Optional) Fraction of absorbed photosynthetically active
+#'  radiation (unitless, defaults to \code{NA})
+#'  - ppfd Incident photosynthetic photon flux density 
+#'  (mol m-2 d-1, defaults to \code{NA}). Note that the units of 
+#'  \code{ppfd} (per area and per time) determine the units of outputs 
+#'  \code{lue}, \code{gpp}, \code{vcmax}, and \code{rd}. For example, 
+#'  if \code{ppfd} is provided in units of mol m-2 month-1, then
+#'  respective output variables are returned as per unit months.
+#'  - patm Atmospheric pressure (Pa). When provided, overrides
+#'  \code{elv}, otherwise \code{patm} is calculated using standard
+#'  atmosphere (101325 Pa), corrected for elevation (argument \code{elv}),
+#'  using the function \link{patm}.
+#'  - elv Elevation above sea-level (m.a.s.l.). Is used only for 
+#'  calculating atmospheric pressure (using standard atmosphere (101325 Pa),
+#'  corrected for elevation (argument \code{elv}), using the function
+#' \link{patm}), if argument \code{patm} is not provided. If argument
+#' \code{patm} is provided, \code{elv} is overridden.
+#' - soilm (Optional, used only if \code{do_soilmstress==TRUE}) Relative 
 #'  soil moisture as a fraction of field capacity (unitless). Defaults to 1.0 
 #'  (no soil moisture stress). This information is used to calculate
 #'  an empirical soil moisture stress factor (\link{soilmstress}) whereby
 #'  the sensitivity is determined by average aridity, defined by the local 
 #'  annual mean ratio of actual over potential evapotranspiration, supplied by
 #'  argument \code{meanalpha}.
-#' @param meanalpha (Optional, used only if \code{do_soilmstress==TRUE}) Local 
+#'  
+#' @param control control parameters to specify how the model is run:
+#'  - beta Unit cost ratio. Defaults to 146.0 (see Stocker et al., 2019).
+#'  - meanalpha (Optional, used only if \code{do_soilmstress==TRUE}) Local 
 #'  annual mean ratio of actual over potential evapotranspiration, measure for 
 #'  average aridity. Defaults to 1.0.
-#' @param apar_soilm (Optional, used only if \code{do_soilmstress==TRUE}) 
-#'  Parameter determining the sensitivity of the empirical soil moisture stress 
-#'  function. Defaults to 0.0, the empirically fitted value as presented in 
-#'  Stocker et al. (2019) Geosci. Model Dev. for model setup 'FULL' 
-#'  (corresponding to a setup with \code{method_jmaxlim="wang17", 
-#'  do_ftemp_kphio=TRUE, do_soilmstress=TRUE}).
-#' @param bpar_soilm (Optional, used only if \code{do_soilmstress==TRUE}) 
-#'  Parameter determining the sensitivity of the empirical soil moisture stress
-#'  function. Defaults to 0.7330, the empirically fitted value as presented in 
-#'  Stocker et al. (2019) Geosci. Model Dev. for model setup 'FULL' 
-#'  (corresponding to a setup with \code{method_jmaxlim="wang17", 
-#'  do_ftemp_kphio=TRUE, do_soilmstress=TRUE}).
-#' @param c4 (Optional) A logical value specifying whether the C3 or C4 
+#'  - c4 (Optional) A logical value specifying whether the C3 or C4 
 #'  photosynthetic pathway is followed.Defaults to \code{FALSE}. If \code{TRUE},
 #'  the leaf-internal CO2 concentration is assumed to be very large and 
 #'  \eqn{m} (returned variable \code{mj}) tends to 1, and \eqn{m'} tends to 
 #'  0.669 (with \code{c = 0.41}).
-#' @param method_optci (Optional) A character string specifying which method is
+#'  - method_optci (Optional) A character string specifying which method is
 #'  to be used for calculating optimal ci:ca. Defaults to \code{"prentice14"}.
 #'  Available also \code{"prentice14_num"} for a numerical solution to the same
 #'  optimization criterium as used for \code{"prentice14"}.
-#' @param method_jmaxlim (Optional) A character string specifying which method 
+#'  - method_jmaxlim (Optional) A character string specifying which method 
 #'  is to be used for factoring in Jmax limitation. Defaults to \code{"wang17"},
 #'  based on Wang Han et al. 2017 Nature Plants and (Smith 1937). Available is 
 #'  also \code{"smith19"}, following the method by Smith et al., 2019 Ecology 
 #'  Letters, and \code{"none"} for ignoring effects of Jmax limitation.
-#' @param do_ftemp_kphio (Optional) A logical specifying whether 
+#'  - do_ftemp_kphio (Optional) A logical specifying whether 
 #'  temperature-dependence of quantum yield efficiency after Bernacchi et al., 
 #'  2003 is to be accounted for. Defaults to \code{TRUE}.
-#' @param do_soilmstress (Optional) A logical specifying whether an empirical 
+#'  - do_soilmstress (Optional) A logical specifying whether an empirical 
 #' soil moisture stress factor is to be applied to down-scale light use 
 #' efficiency (and only light use efficiency). Defaults to \code{FALSE}.
-#' @param returnvar (Optional) A character string of vector of character strings
-#'  specifying which variables are to be returned (see return below).
+#' 
 #' @param verbose Logical, defines whether verbose messages are printed. 
 #'  Defaults to \code{FALSE}.
 #'
@@ -236,45 +240,93 @@
 #'
 
 rpmodel <- function(
-  tc,
-  vpd,
-  co2,
-  fapar,
-  ppfd,
-  patm = NA,
-  elv = NA,
-  kphio = ifelse(do_ftemp_kphio, ifelse(do_soilmstress, 0.087182, 0.081785), 0.049977),
-  beta = 146.0,
-  soilm = stopifnot(!do_soilmstress),
-  meanalpha = 1.0,
-  apar_soilm = 0.0,
-  bpar_soilm = 0.73300,
-  c4 = FALSE,
-  method_optci = "prentice14",
-  method_jmaxlim = "wang17",
-  do_ftemp_kphio = TRUE,
-  do_soilmstress = FALSE,
-  returnvar = NULL,
+  par = list(
+    kphio = 0.049977,
+    apar_soilm = 0.0,
+    bpar_soilm = 0.73300
+    ),
+  data = data.frame(
+    tc  = 20,
+    vpd = 1000,
+    co2 = 400,
+    fapar = 1,
+    ppfd = 30,
+    patm = NA,
+    elv = 0,
+    soilm = NA
+  ),
+  control = list(
+    beta = 146.0,
+    meanalpha = 1.0,
+    c4 = FALSE,
+    method_optci = "prentice14",
+    method_jmaxlim = "wang17",
+    do_ftemp_kphio = TRUE,
+    do_soilmstress = FALSE
+  ),
   verbose = FALSE 
   ){
 
+  # attach elements in par and control
+  # variables
+  tc <- data$tc
+  vpd <- data$vpd
+  co2 <- data$co2
+  ppfd <- data$ppfd
+  fapar <- data$fapar
+  elv <- data$elv
+  patm <- data$patm
+  soilm <- data$soilm
+
+  
+  beta <- control$beta
+  meanalpha <- control$meanalpha
+  c4 <- control$c4
+  method_optci <- control$method_optci
+  method_jmaxlim <- control$method_jmaxlim
+  do_ftemp_kphio <- control$do_ftemp_kphio
+  do_soilmstress <- control$do_soilmstress
+  
+  kphio <- par$kphio
+  apar_soilm <- par$apar_soilm
+  bpar_soilm <- par$bpar_soilm
+  
   # Check arguments
   if (identical(NA, elv) && identical(NA, patm)){
-    stop("Aborted. Provide either elevation (arugment elv) or atmospheric pressure (argument patm).")
+    stop("Aborted. Provide either elevation (arugment elv) 
+          or atmospheric pressure (argument patm).")
   } else if (!identical(NA, elv) && identical(NA, patm)){
-    if (verbose) warning("Atmospheric pressure (patm) not provided. Calculating it as a function of elevation (elv), assuming standard atmosphere (101325 Pa at sea level).")
+    if (verbose) {
+      message(
+       "Atmospheric pressure (patm) not provided.
+        Calculating it as a function of elevation (elv),
+        assuming standard atmosphere (101325 Pa at sea level).")
+      }
     patm <- patm(elv)
   }
 
-  #---- Fixed parameters--------------------------------------------------------
+  if (identical(soilm, NA) & do_soilmstress){
+    stop("Missing soil moisture input data to calculate soil moisture stress")
+  }
+  
+  #---- dynamic kphio settings -----
+  kphio <- ifelse(do_ftemp_kphio,
+                  ifelse(do_soilmstress,
+                         0.087182,
+                         0.081785),
+                  kphio)
+  
+  #---- Fixed parameters ----
   c_molmass <- 12.0107  # molecular mass of carbon (g)
   kPo <- 101325.0       # standard atmosphere, Pa (Allen, 1973)
   kTo <- 25.0           # base temperature, deg C (Prentice, unpublished)
-  rd_to_vcmax <- 0.015  # Ratio of Rdark to Vcmax25, number from Atkin et al., 2015 for C3 herbaceous
+  rd_to_vcmax <- 0.015  # Ratio of Rdark to Vcmax25, number from 
+                        # Atkin et al., 2015 for C3 herbaceous
 
-  #---- Temperature dependence of quantum yield efficiency----------------------
-  ## 'do_ftemp_kphio' is not actually a stress function, but is the temperature-dependency of
-  ## the quantum yield efficiency after Bernacchi et al., 2003 PCE
+  #---- Temperature dependence of quantum yield efficiency ----
+  # 'do_ftemp_kphio' is not actually a stress function,
+  # but is the temperature-dependency of
+  # the quantum yield efficiency after Bernacchi et al., 2003 PCE
   if (do_ftemp_kphio){
     ftemp_kphio <- ftemp_kphio( tc, c4 )
   } else {
@@ -290,22 +342,23 @@ rpmodel <- function(
   }
 
   #---- Photosynthesis parameters depending on temperature, pressure, and CO2. -
-  ## ambient CO2 partial pression (Pa)
+  # ambient CO2 partial pression (Pa)
   ca <- co2_to_ca( co2, patm )
 
-  ## photorespiratory compensation point - Gamma-star (Pa)
+  # photorespiratory compensation point - Gamma-star (Pa)
   gammastar <- gammastar( tc, patm )
 
   ## Michaelis-Menten coef. (Pa)
   kmm <- kmm( tc, patm )   ## XXX Todo: replace 'NA' here with 'patm'
 
-  ## viscosity correction factor = viscosity( temp, press )/viscosity( 25 degC, 1013.25 Pa)
+  # viscosity correction factor = viscosity( temp, press )/viscosity
+  # ( 25 degC, 1013.25 Pa)
   ns      <- viscosity_h2o( tc, patm )  # Pa s
   ns25    <- viscosity_h2o( kTo, kPo )  # Pa s
   ns_star <- ns / ns25  # (unitless)
 
-  ##----Optimal ci -------------------------------------------------------------
-  ## The heart of the P-model: calculate ci:ca ratio (chi) and additional terms
+  #----Optimal ci ----
+  # The heart of the P-model: calculate ci:ca ratio (chi) and additional terms
   
   if (c4){
 
@@ -314,7 +367,7 @@ rpmodel <- function(
 
   } else if (method_optci=="prentice14"){
 
-    #---- Full formualation (Gamma-star not zero), analytical solution ---------
+    #---- Full formualation (Gamma-star not zero), analytical solution ----
     out_optchi <- optimal_chi( kmm, gammastar, ns_star, ca, vpd, beta )
 
   } else {
@@ -326,11 +379,11 @@ rpmodel <- function(
   ## leaf-internal CO2 partial pressure (Pa)
   ci <- out_optchi$chi * ca
 
-  #---- Corrolary preditions ---------------------------------------------------
+  #---- Corrolary preditions ----
   ## intrinsic water use efficiency (in Pa)
   iwue = ( ca - ci ) / 1.6
 
-  #---- Vcmax and light use efficiency -----------------------------------------
+  #---- Vcmax and light use efficiency ----
   # Jmax limitation comes in only at this step
   if (c4){
 
@@ -378,16 +431,17 @@ rpmodel <- function(
 
   }
 
-  #---- Corrolary preditions ---------------------------------------------------
+  #---- Corrolary preditions ----
   # Vcmax25 (vcmax normalized to 25 deg C)
   ftemp25_inst_vcmax  <- ftemp_inst_vcmax( tc, tc, tcref = 25.0 )
   vcmax25_unitiabs  <- out_lue_vcmax$vcmax_unitiabs / ftemp25_inst_vcmax
 
   ## Dark respiration at growth temperature
   ftemp_inst_rd <- ftemp_inst_rd( tc )
-  rd_unitiabs  <- rd_to_vcmax * (ftemp_inst_rd / ftemp25_inst_vcmax) * out_lue_vcmax$vcmax_unitiabs
+  rd_unitiabs  <- rd_to_vcmax * (ftemp_inst_rd / ftemp25_inst_vcmax) *
+    out_lue_vcmax$vcmax_unitiabs
 
-  #---- Quantities that scale linearly with absorbed light ---------------------
+  #---- Quantities that scale linearly with absorbed light ----
   # len <- length(out_lue_vcmax[[1]])
   iabs <- fapar * ppfd
 
@@ -398,7 +452,8 @@ rpmodel <- function(
 
   # Vcmax per unit ground area is the product of the intrinsic quantum
   # efficiency, the absorbed PAR, and 'n'
-  # vcmax <- ifelse(any(is.na(iabs)), rep(NA, len), iabs * out_lue_vcmax$vcmax_unitiabs)
+  # vcmax <- ifelse(any(is.na(iabs)), rep(NA, len), iabs *
+  # out_lue_vcmax$vcmax_unitiabs)
   vcmax <- iabs * out_lue_vcmax$vcmax_unitiabs
 
   ## (vcmax normalized to 25 deg C)
@@ -411,7 +466,8 @@ rpmodel <- function(
 
   # Jmax using again A_J = A_C
   # fact_jmaxlim <- ifelse(!is.na(iabs),
-  #                        vcmax * (ci + 2.0 * gammastar) / (kphio * iabs * (ci + kmm)),
+  #                        vcmax * (ci + 2.0 * gammastar) / 
+  # (kphio * iabs * (ci + kmm)),
   #                        rep(NA, len))
   fact_jmaxlim <- vcmax * (ci + 2.0 * gammastar) / (kphio * iabs * (ci + kmm))
 
@@ -435,7 +491,9 @@ rpmodel <- function(
   # is usually measured should use instantaneous assimilation for comparison to
   # measurements. This is returned by inst_rpmodel().
   assim <- ifelse(a_j < a_c , a_j, a_c)
-  if (any(abs(assim - gpp / c_molmass) > 0.001)) stop("rpmodel(): Assimilation and GPP are not identical.")
+  if (any(abs(assim - gpp / c_molmass) > 0.001)){
+    stop("rpmodel(): Assimilation and GPP are not identical.")
+  }
 
   ## average stomatal conductance
   gs <- assim / (ca - ci)
@@ -461,6 +519,5 @@ rpmodel <- function(
               rd              = rd
               )
 
-  # if (!is.null(returnvar)) out <- out[returnvar]
-  return( out )
+  return(out)
 }
